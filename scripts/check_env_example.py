@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Check that all environment variables referenced in docker-compose.yml
-are documented in .env.example.
+Check that all environment variables referenced in the compose files are
+documented in .env.example: docker-compose.yml and every extra it can include
+(<name>/docker-compose.yml) against the layer's .env.example, and the skeleton
+extra (_template/) against its own .env.example plus the layer's.
 """
 
 import re
@@ -10,6 +12,7 @@ from pathlib import Path
 
 COMPOSE_FILE = Path("docker-compose.yml")
 ENV_EXAMPLE_FILE = Path(".env.example")
+TEMPLATE_DIR = Path("_template")
 
 # Variables provided by Docker Compose itself or hardcoded in the compose file
 COMPOSE_BUILTINS: set[str] = set()
@@ -32,29 +35,40 @@ def extract_env_example_vars(content: str) -> set[str]:
     return vars_
 
 
+def _missing(compose_files: list[Path], env_files: list[Path]) -> set[str]:
+    used = set().union(*(extract_compose_vars(f.read_text()) for f in compose_files))
+    documented = set().union(*(extract_env_example_vars(f.read_text()) for f in env_files))
+    return used - COMPOSE_BUILTINS - documented
+
+
 def main() -> int:
-    if not COMPOSE_FILE.exists():
-        print(f"ERROR: {COMPOSE_FILE} not found", file=sys.stderr)
-        return 1
+    for path in (COMPOSE_FILE, ENV_EXAMPLE_FILE):
+        if not path.exists():
+            print(f"ERROR: {path} not found", file=sys.stderr)
+            return 1
 
-    if not ENV_EXAMPLE_FILE.exists():
-        print(f"ERROR: {ENV_EXAMPLE_FILE} not found", file=sys.stderr)
-        return 1
+    extras = sorted(
+        p for p in Path(".").glob(f"*/{COMPOSE_FILE}") if p.parent != TEMPLATE_DIR
+    )
+    checks = [([COMPOSE_FILE, *extras], [ENV_EXAMPLE_FILE], ENV_EXAMPLE_FILE)]
+    template = TEMPLATE_DIR / COMPOSE_FILE
+    if template.exists():
+        template_env = TEMPLATE_DIR / ENV_EXAMPLE_FILE
+        envs = [ENV_EXAMPLE_FILE, *([template_env] if template_env.exists() else [])]
+        checks.append(([template], envs, template_env))
 
-    compose_vars = extract_compose_vars(COMPOSE_FILE.read_text())
-    env_vars = extract_env_example_vars(ENV_EXAMPLE_FILE.read_text())
-
-    required = compose_vars - COMPOSE_BUILTINS
-    missing = required - env_vars
-
-    if missing:
-        print("FAIL: Variables referenced in docker-compose.yml but missing from .env.example:")
-        for var in sorted(missing):
-            print(f"  - {var}")
-        return 1
-
-    print(f"OK: All {len(required)} variable(s) from docker-compose.yml are in .env.example")
-    return 0
+    failed = False
+    for compose_files, env_files, where in checks:
+        missing = _missing(compose_files, env_files)
+        names = ", ".join(str(f) for f in compose_files)
+        if missing:
+            print(f"FAIL: Variables referenced in {names} but missing from {where}:")
+            for var in sorted(missing):
+                print(f"  - {var}")
+            failed = True
+        else:
+            print(f"OK: every variable in {names} is in {where}")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

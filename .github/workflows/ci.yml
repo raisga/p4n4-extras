@@ -8,14 +8,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # With every profile, so the extras it includes are checked too
       - name: Validate docker-compose
-        run: docker compose -f docker-compose.yml config --quiet
+        run: docker compose -f docker-compose.yml --profile '*' config --quiet
 
       # .env.example isn't YAML: check it by letting Compose load it instead.
       - name: Lint YAML configs
         run: |
           pip install yamllint
-          yamllint -d "{extends: relaxed, rules: {line-length: {max: 120}}}" docker-compose.yml
+          yamllint -d "{extends: relaxed, rules: {line-length: {max: 120}}}" docker-compose.yml */docker-compose.yml
 
       - name: Check .env.example loads in Compose
         run: docker compose --env-file .env.example -f docker-compose.yml config --quiet
@@ -23,27 +24,6 @@ jobs:
       - name: Check .env.example completeness
         run: python3 scripts/check_env_example.py
 
-      - name: Build runner image
-        run: docker compose build ei-runner
-
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      # The image's requirements, so the tests import what the runner really loads.
-      # PyAudio (for the Edge Impulse SDK) compiles against PortAudio's headers.
-      - name: Install test dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends portaudio19-dev
-          pip install -r runner/requirements.txt pytest
-
-      - name: Run tests
-        run: pytest tests/ -v
+      # The skeleton extra must stay valid on its own (its variables: check_env_example.py)
+      - name: Validate the skeleton extra
+        run: docker compose -f _template/docker-compose.yml --env-file _template/.env.example --profile '*' config --quiet

@@ -1,5 +1,5 @@
 # ==============================================================================
-# Edge Impulse Stack .gitignore
+# Extras Stack .gitignore
 # ==============================================================================
 
 # Environment files (contain secrets)
@@ -9,13 +9,6 @@
 
 # Local compose overrides
 docker-compose.override.yml
-
-# Model binaries (provided at deploy time — NEVER commit)
-edge-impulse/models/*.eim
-edge-impulse/models/*.eim.bak
-edge-impulse/models/*.zip
-onnx/models/*.onnx
-onnx/models/*.onnx.bak
 
 # Docker volumes (if mounted locally)
 data/

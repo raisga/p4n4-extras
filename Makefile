@@ -1,9 +1,8 @@
 # ==============================================================================
-# Edge Impulse Stack Makefile
+# Extras Stack Makefile
 # ==============================================================================
 
-.PHONY: help up down restart logs ps clean pull build status interactive start stop \
-        deploy-model test-inference
+.PHONY: help up down restart logs ps clean pull config start stop
 
 # Colors
 GREEN  := \033[0;32m
@@ -14,214 +13,80 @@ BOLD   := \033[1m
 DIM    := \033[2m
 NC     := \033[0m
 
-# Service list
-EDGE_SERVICES := ei-runner
-
-# Each service is in a Compose profile of the same name. Started when neither
-# the environment nor .env sets COMPOSE_PROFILES:
-DEFAULT_PROFILES := ei-runner
-ifeq ($(origin COMPOSE_PROFILES)$(shell grep -s '^COMPOSE_PROFILES=' .env),undefined)
-export COMPOSE_PROFILES := $(DEFAULT_PROFILES)
-endif
-
+# Each service is in a Compose profile of the same name, and nothing starts by
+# default: COMPOSE_PROFILES in .env lists the ones to run.
 # down/clean also stop services started outside COMPOSE_PROFILES (make start)
 ALL_PROFILES := --profile '*'
 
 # Default target
 help:
 	@echo ""
-	@printf "$(BOLD)$(CYAN)  Edge Impulse Stack$(NC) - Available Commands\n"
+	@printf "$(BOLD)$(CYAN)  Extras Stack$(NC) - Available Commands (optional services)\n"
 	@echo "  ════════════════════════════════════════════"
 	@echo ""
-	@printf "  $(BOLD)Core:$(NC)\n"
-	@printf "    $(GREEN)make up$(NC)              Start the services in COMPOSE_PROFILES\n"
+	@printf "    $(GREEN)make up$(NC)              Start the services in COMPOSE_PROFILES (none by default)\n"
 	@printf "    $(GREEN)make down$(NC)            Stop all services\n"
 	@printf "    $(GREEN)make restart$(NC)         Restart all services\n"
-	@printf "    $(GREEN)make status$(NC)          Show service status table\n"
 	@printf "    $(GREEN)make logs$(NC)            Follow logs for all services\n"
 	@printf "    $(GREEN)make ps$(NC)              Docker compose ps\n"
-	@printf "    $(GREEN)make pull$(NC)            Pull latest base images\n"
-	@printf "    $(GREEN)make build$(NC)           Build the runner image\n"
+	@printf "    $(GREEN)make pull$(NC)            Pull the images of the services in COMPOSE_PROFILES\n"
+	@printf "    $(GREEN)make config$(NC)          Validate docker-compose.yml, its extras and _template/\n"
+	@printf "    $(GREEN)make start SERVICE=x$(NC) Start one service, listed in COMPOSE_PROFILES or not\n"
+	@printf "    $(GREEN)make stop SERVICE=x$(NC)  Stop one service\n"
 	@printf "    $(GREEN)make clean$(NC)           Stop and remove volumes\n"
 	@echo ""
-	@printf "  $(BOLD)Modular:$(NC)\n"
-	@printf "    $(GREEN)make interactive$(NC)     Interactive service selector\n"
-	@printf "    $(GREEN)make start SERVICE=x$(NC) Start a service + its deps\n"
-	@printf "    $(GREEN)make stop SERVICE=x$(NC)  Stop a service (warns about deps)\n"
+	@printf "  $(DIM)Add an extra: copy _template/ (README.md, \"Adding an extra\").$(NC)\n"
 	@echo ""
-	@printf "  $(BOLD)Models:$(NC)\n"
-	@printf "    $(GREEN)make deploy-model MODEL=path/to/model.{eim,onnx}$(NC)\n"
-	@printf "                         Copy a .eim model to edge-impulse/models/\n"
-	@printf "                         or a .onnx model to onnx/models/\n"
-	@echo ""
-	@printf "  $(BOLD)Testing:$(NC)\n"
-	@printf "    $(GREEN)make test-inference$(NC)  Send test sensor data to MQTT\n"
-	@echo ""
-
-# ------------------------------------------------------------------------------
-# Core Commands
-# ------------------------------------------------------------------------------
 
 up:
-	@echo "Starting Edge Impulse stack..."
-	@echo ""
-	@printf "$(YELLOW)  NOTE: p4n4-net must exist. Start p4n4-iot first, or run:$(NC)\n"
-	@printf "$(YELLOW)        docker network create p4n4-net$(NC)\n"
-	@echo ""
-	docker compose up -d
-	@echo ""
-	@echo "Services started! Access them at:"
-	@printf "  $(CYAN)Runner health$(NC): http://localhost:8080/health\n"
-	@echo ""
+	@if [ -z "$$(docker compose config --services 2>/dev/null)" ]; then \
+		printf "$(DIM)  No extras enabled (COMPOSE_PROFILES in .env is empty): nothing to start.$(NC)\n"; \
+	else \
+		printf "$(YELLOW)  NOTE: p4n4-net must exist. Start p4n4-iot first, or run: docker network create p4n4-net$(NC)\n"; \
+		docker compose up -d; \
+	fi
 
 down:
-	@echo "Stopping Edge Impulse stack..."
 	docker compose $(ALL_PROFILES) down
 
 restart:
-	@echo "Restarting Edge Impulse stack..."
 	docker compose restart
 
 logs:
-	docker compose logs -f
+	docker compose $(ALL_PROFILES) logs -f
 
 ps:
-	docker compose ps
+	docker compose $(ALL_PROFILES) ps
 
 pull:
-	@echo "Pulling latest base images..."
 	docker compose pull
 
-build:
-	@echo "Building Edge Impulse runner image..."
-	docker compose build
+config:
+	docker compose $(ALL_PROFILES) config --quiet
+	docker compose -f _template/docker-compose.yml --env-file _template/.env.example $(ALL_PROFILES) config --quiet
+	python3 scripts/check_env_example.py
+	@printf "$(GREEN)  docker-compose.yml, its extras and _template/ are valid$(NC)\n"
+
+start:
+ifndef SERVICE
+	@printf "$(RED)  Usage: make start SERVICE=<name>$(NC)\n"
+	@exit 1
+endif
+	docker compose --profile $(SERVICE) up -d $(SERVICE)
+
+stop:
+ifndef SERVICE
+	@printf "$(RED)  Usage: make stop SERVICE=<name>$(NC)\n"
+	@exit 1
+endif
+	docker compose $(ALL_PROFILES) stop $(SERVICE)
 
 clean:
-	@printf "$(RED)$(BOLD)  WARNING: This will DELETE ALL DATA (runner state, inference logs)$(NC)\n"
+	@printf "$(RED)$(BOLD)  WARNING: This will DELETE ALL DATA of the extras services$(NC)\n"
 	@read -p "  Type 'yes' to confirm: " confirm; \
 	if [ "$$confirm" = "yes" ]; then \
-		echo "Stopping services and removing volumes..."; \
 		docker compose $(ALL_PROFILES) down -v; \
 		echo "Cleaned up!"; \
 	else \
 		echo "Cancelled."; \
 	fi
-
-# ------------------------------------------------------------------------------
-# Status (colorized service table)
-# ------------------------------------------------------------------------------
-
-status:
-	@echo ""
-	@printf "$(BOLD)$(CYAN)  Edge Impulse Stack - Service Status$(NC)\n"
-	@echo "  ════════════════════════════════════════════════════════════════════"
-	@printf "  $(BOLD)%-14s %-12s %-8s %s$(NC)\n" "SERVICE" "STATUS" "PORT" "URL"
-	@printf "  $(DIM)%-14s %-12s %-8s %s$(NC)\n" "─────────────" "──────────" "──────" "───────────────────────────"
-	@for svc in ei-runner; do \
-		container="p4n4-$$svc"; \
-		state=$$(docker inspect --format='{{.State.Status}}' $$container 2>/dev/null || echo "stopped"); \
-		case $$svc in \
-			ei-runner) port="8080"; url="http://localhost:8080/health" ;; \
-		esac; \
-		if [ "$$state" = "running" ]; then \
-			printf "  $(BOLD)%-14s$(NC) $(GREEN)%-12s$(NC) %-8s %s\n" "$$svc" "running" "$$port" "$$url"; \
-		else \
-			printf "  $(BOLD)%-14s$(NC) $(RED)%-12s$(NC) %-8s $(DIM)%s$(NC)\n" "$$svc" "$$state" "$$port" "-"; \
-		fi; \
-	done
-	@echo ""
-
-# ------------------------------------------------------------------------------
-# Interactive Service Selector
-# ------------------------------------------------------------------------------
-
-interactive:
-	@bash scripts/selector.sh
-
-# ------------------------------------------------------------------------------
-# Granular Start/Stop with Dependency Awareness
-# ------------------------------------------------------------------------------
-
-# Dependency map
-deps_ei-runner :=
-
-# Reverse deps (what breaks)
-rdeps_ei-runner :=
-
-start:
-ifndef SERVICE
-	@printf "$(RED)  Usage: make start SERVICE=<name>$(NC)\n"
-	@printf "  Available: $(BOLD)ei-runner$(NC)\n"
-	@exit 1
-endif
-	@deps="$(deps_$(SERVICE))"; \
-	if [ -n "$$deps" ]; then \
-		printf "$(YELLOW)  Auto-starting dependencies: $(BOLD)$$deps$(NC)\n"; \
-		docker compose $(foreach d,$(deps_$(SERVICE)),--profile $(d)) up -d $$deps; \
-	fi
-	@printf "$(GREEN)  Starting $(BOLD)$(SERVICE)$(NC)$(GREEN)...$(NC)\n"
-	@docker compose $(foreach d,$(deps_$(SERVICE)) $(SERVICE),--profile $(d)) up -d $(SERVICE)
-	@printf "$(GREEN)$(BOLD)  Done!$(NC)\n"
-
-stop:
-ifndef SERVICE
-	@printf "$(RED)  Usage: make stop SERVICE=<name>$(NC)\n"
-	@printf "  Available: $(BOLD)ei-runner$(NC)\n"
-	@exit 1
-endif
-	@rdeps="$(rdeps_$(SERVICE))"; \
-	if [ -n "$$rdeps" ]; then \
-		for dep in $$rdeps; do \
-			state=$$(docker inspect --format='{{.State.Status}}' "p4n4-$$dep" 2>/dev/null || echo "stopped"); \
-			if [ "$$state" = "running" ]; then \
-				printf "$(RED)  WARNING: Stopping '$(SERVICE)' will affect running service: $(BOLD)$$dep$(NC)\n"; \
-			fi; \
-		done; \
-	fi
-	@printf "$(YELLOW)  Stopping $(BOLD)$(SERVICE)$(NC)$(YELLOW)...$(NC)\n"
-	@docker compose stop $(SERVICE)
-	@printf "$(GREEN)$(BOLD)  Done!$(NC)\n"
-
-# ------------------------------------------------------------------------------
-# Model Deployment (.eim → edge-impulse/models/, .onnx → onnx/models/)
-# ------------------------------------------------------------------------------
-
-deploy-model:
-ifndef MODEL
-	@printf "$(RED)  Usage: make deploy-model MODEL=path/to/model.eim|model.onnx$(NC)\n"
-	@exit 1
-endif
-	@printf "$(CYAN)  Deploying model: $(BOLD)$(MODEL)$(NC)\n"
-	@case "$(MODEL)" in \
-	*.eim) \
-		cp "$(MODEL)" edge-impulse/models/; \
-		printf "$(GREEN)  Model copied to edge-impulse/models/$(NC)\n"; \
-		printf "$(YELLOW)  Set EI_MODEL_FILE=$(notdir $(MODEL)) in your .env, then recreate the runner:$(NC)\n"; \
-		printf "$(YELLOW)    make up$(NC)\n" ;; \
-	*.onnx) \
-		cp "$(MODEL)" onnx/models/; \
-		printf "$(GREEN)  Model copied to onnx/models/$(NC)\n"; \
-		printf "$(YELLOW)  Set ONNX_MODEL_FILE=$(notdir $(MODEL)) in your .env, then recreate the runner:$(NC)\n"; \
-		printf "$(YELLOW)    make up$(NC)\n" ;; \
-	*) \
-		printf "$(RED)  Unsupported model type: $(MODEL) (expected .eim or .onnx)$(NC)\n"; \
-		exit 1 ;; \
-	esac
-
-# ------------------------------------------------------------------------------
-# Testing Commands
-# ------------------------------------------------------------------------------
-
-test-inference:
-	@printf "$(CYAN)  Publishing test sensor data to MQTT (topic: sensors/test-sensor-01/raw)...$(NC)\n"
-	@docker run --rm --network p4n4-net eclipse-mosquitto:2 \
-		mosquitto_pub -h p4n4-mqtt -t 'sensors/test-sensor-01/raw' \
-		-m '{"values":[1.23,4.56,7.89,0.12,3.45,6.78]}' \
-		2>/dev/null \
-		|| printf "$(RED)  Could not connect to p4n4-mqtt. Is p4n4-iot running?$(NC)\n"
-	@echo ""
-	@printf "$(CYAN)  Subscribing to inference/test-sensor-01/result for 3 seconds...$(NC)\n"
-	@docker run --rm --network p4n4-net eclipse-mosquitto:2 \
-		mosquitto_sub -h p4n4-mqtt -t 'inference/test-sensor-01/result' -W 3 \
-		2>/dev/null \
-		|| printf "$(DIM)  No results received (check ei-runner logs: make logs)$(NC)\n"

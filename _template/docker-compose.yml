@@ -1,0 +1,46 @@
+# ====================================================================================
+# my-extra: one line on what it does, and why it isn't core
+# ====================================================================================
+# A skeleton extra. Copy this directory to ../<name>/, rename my-extra / MY_EXTRA
+# everywhere, and add `- <name>/docker-compose.yml` to `include:` in
+# ../docker-compose.yml. Paths here are relative to this directory. CI checks this
+# file on its own: docker compose -f _template/docker-compose.yml config
+# ====================================================================================
+
+services:
+
+  my-extra:
+    # Pinned to an exact version, never latest
+    image: example/my-extra:1.0.0
+    # p4n4-<name>: other stacks reach it at this name on p4n4-net
+    container_name: p4n4-my-extra
+    # Its own profile: it starts only when COMPOSE_PROFILES lists it
+    profiles: [my-extra]
+    restart: ${RESTART_POLICY:-unless-stopped}
+    ports:
+      # Localhost only by default; MY_EXTRA_BIND=0.0.0.0 on a trusted network
+      - "${MY_EXTRA_BIND:-127.0.0.1}:${MY_EXTRA_PORT:-9999}:9999"
+    environment:
+      TZ: ${TZ:-UTC}
+      # Secrets come from the layer's .env, never from this file
+      MY_EXTRA_PASSWORD: ${MY_EXTRA_PASSWORD:-}
+    volumes:
+      # Config from this extra's config/, read-only; state in a named volume
+      - ./config:/etc/my-extra:ro
+      - my-extra-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:9999/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - p4n4-net
+
+networks:
+  p4n4-net:
+    external: true
+    name: p4n4-net
+
+volumes:
+  my-extra-data:
