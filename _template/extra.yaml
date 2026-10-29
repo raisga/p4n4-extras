@@ -1,0 +1,39 @@
+# ==============================================================================
+# my-extra: its manifest, validated against ../schema/extra.schema.json
+# ==============================================================================
+# Rename my-extra / MY_EXTRA, then fill in what the extra is and needs. CI runs
+# scripts/validate.py, which also checks the compose file, the files listed here,
+# .github/CODEOWNERS and the README catalog row against it.
+#
+# Kinds: ingest (device → MQTT), bridge (MQTT ↔ another bus or broker), actuator
+# (acts on commands/…), service (anything else). Ingest, bridge and actuator also
+# need hardware.simulator, smoke_test, a health URL and the status/<device-id>/online
+# heartbeat, and meet every container rule; see ../obd2/extra.yaml for one.
+# ==============================================================================
+schema_version: 1
+name: my-extra
+version: 0.1.0
+maturity: incubating          # incubating, community or official (README: Maturity)
+kind: service
+title: My Extra
+description: >-
+  One or two sentences: what it does, and why it's an extra rather than core.
+license: MIT                  # SPDX, from ../schema/licenses.yaml; not MIT → ship LICENSE
+maintainers:
+  - your-github-handle
+safety: read-only             # writes-bus if it can act on a device or bus
+
+services:
+  - name: my-extra
+    profile: my-extra
+    health: http://p4n4-my-extra:9999/health
+
+env:
+  required: []
+  optional: [MY_EXTRA_BIND, MY_EXTRA_PORT, MY_EXTRA_PASSWORD]
+
+# Kind service only: a container rule a third-party image can't meet, with why
+# exceptions:
+#   - service: my-extra
+#     rule: non-root
+#     reason: The upstream image starts as root to chown its data directory

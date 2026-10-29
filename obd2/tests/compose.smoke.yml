@@ -1,0 +1,28 @@
+# The smoke test's additions to ../docker-compose.yml: its own network, container
+# names and broker, so it never touches a running p4n4 (tests/smoke.sh)
+services:
+  obd2:
+    container_name: p4n4-obd2-smoke
+    ports: !reset []
+    environment:
+      OBD_DEVICE: socket://obd2-sim:35000
+      MQTT_HOST: mqtt
+      OBD_DEVICE_ID: smoke
+
+  obd2-sim:
+    container_name: p4n4-obd2-sim-smoke
+    environment:
+      OBD_SIM_SCENARIO: /app/scenarios/warmup.yaml
+
+  mqtt:
+    image: eclipse-mosquitto:2.0.22
+    container_name: p4n4-obd2-smoke-mqtt
+    profiles: [obd2]
+    command: mosquitto -c /mosquitto-no-auth.conf
+    networks:
+      - p4n4-net
+
+networks:
+  p4n4-net:
+    external: false
+    name: p4n4-obd2-smoke

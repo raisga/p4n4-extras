@@ -1,0 +1,85 @@
+# ====================================================================================
+# obd2: OBD-II adapter → MQTT, plus an ELM327 simulator to run without a car
+# ====================================================================================
+# An extra, not core: it's for vehicles only, and needs an adapter (or the simulator).
+# Copy this directory into a project's extras/ layer, add `- obd2/docker-compose.yml`
+# to its `include:`, and append .env.example to the layer's. Paths here are relative
+# to this directory. A USB adapter is mapped in the layer's docker-compose.override.yml
+# (see override.example.yml), so this file runs anywhere.
+#
+#   COMPOSE_PROFILES=obd2,obd2-sim   the bridge and a simulated car
+#   COMPOSE_PROFILES=obd2            the bridge and a real adapter (OBD_DEVICE)
+# ====================================================================================
+
+services:
+
+  obd2:
+    # Built locally from service/ (incubating: no published image yet)
+    image: p4n4-obd2:0.1.0
+    build: ./service
+    container_name: p4n4-obd2
+    profiles: [obd2]
+    restart: ${RESTART_POLICY:-unless-stopped}
+    # Non-root (USER in its Dockerfile), read-only root filesystem, no capabilities
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      # Read-only API: health, probe, trouble codes. Localhost only by default
+      - "${OBD2_BIND:-127.0.0.1}:${OBD2_PORT:-8090}:8090"
+    environment:
+      TZ: ${TZ:-UTC}
+      OBD_DEVICE: ${OBD_DEVICE:-socket://p4n4-obd2-sim:35000}
+      OBD_DEVICE_ID: ${OBD_DEVICE_ID:-car}
+      OBD_BAUDRATE: ${OBD_BAUDRATE:-}
+      OBD_PROTOCOL: ${OBD_PROTOCOL:-}
+      OBD_POLL_FAST_HZ: ${OBD_POLL_FAST_HZ:-5}
+      OBD_POLL_SLOW_HZ: ${OBD_POLL_SLOW_HZ:-1}
+      OBD_VOLTAGE_INTERVAL: ${OBD_VOLTAGE_INTERVAL:-5}
+      OBD_DTC_INTERVAL: ${OBD_DTC_INTERVAL:-30}
+      OBD_PIDS: ${OBD_PIDS:-}
+      OBD_RAW: ${OBD_RAW:-true}
+      MQTT_HOST: ${MQTT_HOST:-p4n4-mqtt}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USER: ${MQTT_USER:-}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      OBD2_LOG_LEVEL: ${OBD2_LOG_LEVEL:-INFO}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8090/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - p4n4-net
+
+  obd2-sim:
+    # A simulated car and ELM327 adapter on TCP 35000 (p4n4-net only)
+    image: p4n4-obd2-sim:0.1.0
+    build: ./simulator
+    container_name: p4n4-obd2-sim
+    profiles: [obd2-sim]
+    restart: ${RESTART_POLICY:-unless-stopped}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      OBD_SIM_SCENARIO: /app/scenarios/${OBD_SIM_SCENARIO:-warmup}.yaml
+      OBD_SIM_DROP_EVERY: ${OBD_SIM_DROP_EVERY:-0}
+    volumes:
+      # Add your own scenarios here, no rebuild needed
+      - ./simulator/scenarios:/app/scenarios:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 35000), 3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - p4n4-net
+
+networks:
+  p4n4-net:
+    external: true
+    name: p4n4-net

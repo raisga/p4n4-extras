@@ -8,15 +8,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install the checks' dependencies
+        run: pip install pyyaml jsonschema yamllint pytest
+
       # With every profile, so the extras it includes are checked too
       - name: Validate docker-compose
         run: docker compose -f docker-compose.yml --profile '*' config --quiet
 
+      # Each extra on its own (the catalog and the skeleton), as a project includes it
+      - name: Validate every extra's compose file
+        run: |
+          for f in */docker-compose.yml; do
+            d=${f%/docker-compose.yml}
+            echo "$d"
+            docker compose -f "$f" --env-file .env.example --env-file "$d/.env.example" --profile '*' config --quiet
+          done
+
       # .env.example isn't YAML: check it by letting Compose load it instead.
       - name: Lint YAML configs
         run: |
-          pip install yamllint
-          yamllint -d "{extends: relaxed, rules: {line-length: {max: 120}}}" docker-compose.yml */docker-compose.yml
+          yamllint -d "{extends: relaxed, rules: {line-length: {max: 120}}}" \
+            docker-compose.yml */docker-compose.yml */extra.yaml schema/licenses.yaml \
+            $(ls */override.example.yml */tests/compose.smoke.yml */simulator/scenarios/*.yaml 2>/dev/null)
 
       - name: Check .env.example loads in Compose
         run: docker compose --env-file .env.example -f docker-compose.yml config --quiet
@@ -24,6 +41,51 @@ jobs:
       - name: Check .env.example completeness
         run: python3 scripts/check_env_example.py
 
-      # The skeleton extra must stay valid on its own (its variables: check_env_example.py)
-      - name: Validate the skeleton extra
-        run: docker compose -f _template/docker-compose.yml --env-file _template/.env.example --profile '*' config --quiet
+      # extra.yaml, the compose files, topics, files, CODEOWNERS and the catalog row
+      - name: Check every extra against the contract
+        run: python3 scripts/validate.py
+
+      - name: Test the validator
+        run: python3 -m pytest -q tests
+
+  # Each extra's own tests, against its simulator: no Docker, no hardware
+  extras-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run each extra's tests
+        run: |
+          for req in */tests/requirements.txt; do
+            d=${req%/tests/requirements.txt}
+            echo "::group::$d"
+            python3 -m venv "/tmp/venv-$d"
+            "/tmp/venv-$d/bin/pip" install -q -r "$req"
+            (cd "$d" && "/tmp/venv-$d/bin/python" -m pytest -q tests)
+            echo "::endgroup::"
+          done
+
+  # Each extra's smoke test: its images, its simulator and a broker, in Docker
+  extras-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install the validator's dependencies
+        run: pip install pyyaml jsonschema
+
+      - name: Run each extra's smoke test
+        run: |
+          for t in $(python3 scripts/validate.py --smoke-tests); do
+            echo "::group::$t"
+            "$t"
+            echo "::endgroup::"
+          done

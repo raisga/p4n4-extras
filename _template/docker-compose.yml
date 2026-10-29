@@ -17,6 +17,13 @@ services:
     # Its own profile: it starts only when COMPOSE_PROFILES lists it
     profiles: [my-extra]
     restart: ${RESTART_POLICY:-unless-stopped}
+    # Hardened: non-root, read-only root filesystem, no capabilities. Kind service
+    # may relax one with an `exceptions:` entry in extra.yaml, and a reason
+    user: "10001:10001"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     ports:
       # Localhost only by default; MY_EXTRA_BIND=0.0.0.0 on a trusted network
       - "${MY_EXTRA_BIND:-127.0.0.1}:${MY_EXTRA_PORT:-9999}:9999"

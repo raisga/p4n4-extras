@@ -1,0 +1,4 @@
+# Each extra has its maintainers (extra.yaml `maintainers`); scripts/validate.py
+# checks every extra has a line here listing them.
+*            @jraleman
+/obd2/       @jraleman

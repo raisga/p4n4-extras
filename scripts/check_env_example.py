@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """
 Check that all environment variables referenced in the compose files are
-documented in .env.example: docker-compose.yml and every extra it can include
-(<name>/docker-compose.yml) against the layer's .env.example, and the skeleton
-extra (_template/) against its own .env.example plus the layer's.
+documented in .env.example: docker-compose.yml and the extras its `include:` lists
+against the layer's .env.example, and every other extra directory (the catalog's
+extras, which a project copies in, and the skeleton _template/) against its own
+.env.example plus the layer's.
 """
 
 import re
 import sys
 from pathlib import Path
 
+import yaml
+
 COMPOSE_FILE = Path("docker-compose.yml")
 ENV_EXAMPLE_FILE = Path(".env.example")
-TEMPLATE_DIR = Path("_template")
 
 # Variables provided by Docker Compose itself or hardcoded in the compose file
 COMPOSE_BUILTINS: set[str] = set()
@@ -41,21 +43,32 @@ def _missing(compose_files: list[Path], env_files: list[Path]) -> set[str]:
     return used - COMPOSE_BUILTINS - documented
 
 
+def included(compose: Path) -> list[Path]:
+    """The compose files docker-compose.yml pulls in with `include:`."""
+    entries = (yaml.safe_load(compose.read_text()) or {}).get("include") or []
+    paths = []
+    for entry in entries:
+        # Short form "a.yml", or long form {path: "a.yml"} or {path: ["a.yml", ...]}
+        found = entry if isinstance(entry, str) else entry.get("path") or []
+        for path in [found] if isinstance(found, str) else found:
+            paths.append(Path(path))
+    return paths
+
+
 def main() -> int:
     for path in (COMPOSE_FILE, ENV_EXAMPLE_FILE):
         if not path.exists():
             print(f"ERROR: {path} not found", file=sys.stderr)
             return 1
 
-    extras = sorted(
-        p for p in Path(".").glob(f"*/{COMPOSE_FILE}") if p.parent != TEMPLATE_DIR
-    )
-    checks = [([COMPOSE_FILE, *extras], [ENV_EXAMPLE_FILE], ENV_EXAMPLE_FILE)]
-    template = TEMPLATE_DIR / COMPOSE_FILE
-    if template.exists():
-        template_env = TEMPLATE_DIR / ENV_EXAMPLE_FILE
-        envs = [ENV_EXAMPLE_FILE, *([template_env] if template_env.exists() else [])]
-        checks.append(([template], envs, template_env))
+    layer = included(COMPOSE_FILE)
+    checks = [([COMPOSE_FILE, *layer], [ENV_EXAMPLE_FILE], ENV_EXAMPLE_FILE)]
+    for compose in sorted(Path(".").glob(f"*/{COMPOSE_FILE}")):
+        if compose in layer:
+            continue
+        own_env = compose.parent / ENV_EXAMPLE_FILE
+        envs = [ENV_EXAMPLE_FILE, *([own_env] if own_env.exists() else [])]
+        checks.append(([compose], envs, own_env))
 
     failed = False
     for compose_files, env_files, where in checks:

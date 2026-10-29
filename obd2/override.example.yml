@@ -1,0 +1,14 @@
+# ==============================================================================
+# obd2 with a USB adapter: copy into the extras layer's docker-compose.override.yml
+# ==============================================================================
+# Set OBD_DEVICE in .env to the adapter's stable path, e.g.
+#   OBD_DEVICE=/dev/serial/by-id/usb-ScanTool.net_LLC_OBDLink_SX_…-if00-port0
+# and OBD_DEVICE_GID to the group that owns it (stat -c %g "$OBD_DEVICE").
+# Not needed for the simulator or a Wi-Fi adapter (socket://…).
+# ==============================================================================
+services:
+  obd2:
+    devices:
+      - ${OBD_DEVICE}:${OBD_DEVICE}
+    group_add:
+      - "${OBD_DEVICE_GID:-20}"

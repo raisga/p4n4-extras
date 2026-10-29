@@ -2,7 +2,7 @@
 # Extras Stack Makefile
 # ==============================================================================
 
-.PHONY: help up down restart logs ps clean pull config start stop
+.PHONY: help up down restart logs ps clean pull config validate test smoke start stop
 
 # Colors
 GREEN  := \033[0;32m
@@ -18,6 +18,10 @@ NC     := \033[0m
 # down/clean also stop services started outside COMPOSE_PROFILES (make start)
 ALL_PROFILES := --profile '*'
 
+# validate/test need PyYAML and jsonschema (plus pytest and each extra's
+# tests/requirements.txt for test)
+PYTHON ?= python3
+
 # Default target
 help:
 	@echo ""
@@ -30,7 +34,10 @@ help:
 	@printf "    $(GREEN)make logs$(NC)            Follow logs for all services\n"
 	@printf "    $(GREEN)make ps$(NC)              Docker compose ps\n"
 	@printf "    $(GREEN)make pull$(NC)            Pull the images of the services in COMPOSE_PROFILES\n"
-	@printf "    $(GREEN)make config$(NC)          Validate docker-compose.yml, its extras and _template/\n"
+	@printf "    $(GREEN)make config$(NC)          Validate docker-compose.yml and every extra's compose file\n"
+	@printf "    $(GREEN)make validate$(NC)        Check every extra against the contract\n"
+	@printf "    $(GREEN)make test$(NC)            Run the validator's and each extra's tests (no Docker)\n"
+	@printf "    $(GREEN)make smoke$(NC)           Run each extra's smoke test (Docker)\n"
 	@printf "    $(GREEN)make start SERVICE=x$(NC) Start one service, listed in COMPOSE_PROFILES or not\n"
 	@printf "    $(GREEN)make stop SERVICE=x$(NC)  Stop one service\n"
 	@printf "    $(GREEN)make clean$(NC)           Stop and remove volumes\n"
@@ -59,13 +66,35 @@ ps:
 	docker compose $(ALL_PROFILES) ps
 
 pull:
-	docker compose pull
+	docker compose pull --ignore-buildable
 
+# Each extra's compose file on its own, as a project would include it
 config:
 	docker compose $(ALL_PROFILES) config --quiet
-	docker compose -f _template/docker-compose.yml --env-file _template/.env.example $(ALL_PROFILES) config --quiet
-	python3 scripts/check_env_example.py
-	@printf "$(GREEN)  docker-compose.yml, its extras and _template/ are valid$(NC)\n"
+	@for f in */docker-compose.yml; do \
+		d=$${f%/docker-compose.yml}; \
+		docker compose -f $$f --env-file .env.example --env-file $$d/.env.example $(ALL_PROFILES) config --quiet || exit 1; \
+	done
+	$(PYTHON) scripts/check_env_example.py
+	@printf "$(GREEN)  docker-compose.yml and every extra's compose file are valid$(NC)\n"
+
+validate:
+	$(PYTHON) scripts/validate.py
+
+# Each extra's tests run from its own directory
+test:
+	$(PYTHON) -m pytest -q tests
+	@for d in */tests; do \
+		ls $$d/test_*.py >/dev/null 2>&1 || continue; \
+		printf "$(CYAN)  $${d%/tests}$(NC)\n"; \
+		(cd $${d%/tests} && $(PYTHON) -m pytest -q tests) || exit 1; \
+	done
+
+smoke:
+	@for t in $$($(PYTHON) scripts/validate.py --smoke-tests); do \
+		printf "$(CYAN)  $$t$(NC)\n"; \
+		$$t || exit 1; \
+	done
 
 start:
 ifndef SERVICE

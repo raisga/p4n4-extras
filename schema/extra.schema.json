@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/raisga/p4n4-extras/blob/main/schema/extra.schema.json",
+  "title": "p4n4 extra manifest (extra.yaml)",
+  "description": "What an extra is, what it needs and what it publishes. scripts/validate.py checks it against this schema, then checks the rules a schema can't express (compose file, files, CODEOWNERS).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "name", "version", "maturity", "kind", "title", "description",
+    "license", "maintainers", "safety", "services"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "name": {
+      "description": "The extra's directory, profile and container name (p4n4-<name>)",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$",
+      "maxLength": 32
+    },
+    "version": {
+      "description": "Semantic version; built images are tagged with it",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$"
+    },
+    "maturity": { "enum": ["incubating", "community", "official"] },
+    "kind": {
+      "description": "ingest: device → MQTT; bridge: MQTT ↔ another bus or broker; actuator: acts on commands/…; service: anything else",
+      "enum": ["ingest", "bridge", "actuator", "service"]
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "description": { "type": "string", "minLength": 1 },
+    "license": {
+      "description": "SPDX identifier, from schema/licenses.yaml",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9.+-]+$"
+    },
+    "maintainers": {
+      "description": "GitHub handles, without the @; each needs a .github/CODEOWNERS entry",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$" }
+    },
+    "safety": {
+      "description": "read-only: never transmits anything but diagnostic requests; writes-bus: may act on a bus, needs maintainer review",
+      "enum": ["read-only", "writes-bus"]
+    },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["env", "description"],
+            "properties": {
+              "env": { "$ref": "#/$defs/env_key" },
+              "description": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "simulator": {
+          "description": "Directory, relative to the extra, of the hardware-free simulator used in CI and by p4n4-emu",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "services": {
+      "description": "Every service in the extra's docker-compose.yml",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "profile"],
+        "properties": {
+          "name": { "$ref": "#/$defs/service_name" },
+          "profile": { "$ref": "#/$defs/service_name" },
+          "health": {
+            "description": "URL on p4n4-net answering GET with 200 while the service works",
+            "type": "string",
+            "pattern": "^https?://[^/]+/.*health$"
+          },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "device_id_env": { "$ref": "#/$defs/env_key" },
+        "publishes": { "type": "array", "items": { "$ref": "#/$defs/topic" } },
+        "subscribes": { "type": "array", "items": { "$ref": "#/$defs/topic" } }
+      }
+    },
+    "env": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "required": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/env_key" } },
+        "optional": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/env_key" } }
+      }
+    },
+    "api": {
+      "description": "HTTP endpoints other p4n4 pieces (the harness, p4n4-api) may call",
+      "type": "array",
+      "items": { "type": "string", "pattern": "^(GET|POST|PUT|PATCH|DELETE) /\\S*$" }
+    },
+    "smoke_test": {
+      "description": "Script, relative to the extra, that starts it against its simulator and checks the data",
+      "type": "string",
+      "minLength": 1
+    },
+    "exceptions": {
+      "description": "Container rules a third-party image can't meet. Only kind service may declare them",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["service", "rule", "reason"],
+        "properties": {
+          "service": { "$ref": "#/$defs/service_name" },
+          "rule": {
+            "enum": [
+              "non-root", "read-only-rootfs", "cap-drop-all", "cap-add", "no-new-privileges",
+              "privileged", "host-network", "healthcheck", "localhost-ports"
+            ]
+          },
+          "reason": { "type": "string", "minLength": 10 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "env_key": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+    "service_name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$" },
+    "topic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pattern"],
+      "properties": {
+        "pattern": { "type": "string", "minLength": 1 },
+        "payload": { "type": "string" },
+        "retained": { "type": "boolean" },
+        "rate": { "type": "string" }
+      }
+    }
+  }
+}

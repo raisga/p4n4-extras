@@ -1,0 +1,82 @@
+# ==============================================================================
+# obd2: its manifest, validated against ../schema/extra.schema.json
+# ==============================================================================
+schema_version: 1
+name: obd2
+version: 0.1.0
+maturity: incubating
+kind: ingest
+title: OBD-II → MQTT
+description: >-
+  Reads a vehicle's OBD-II port through an ELM327-compatible adapter (STN
+  recommended; USB, or Wi-Fi over TCP) and publishes readings, trouble codes and
+  adapter status over MQTT. Ships an ELM327 simulator for CI and p4n4-emu.
+license: GPL-2.0-only         # it imports python-OBD (GPL-2.0-only)
+maintainers:
+  - jraleman
+# Transmits diagnostic requests only (modes 01, 03, 06, 07, 09, 0A) and the AT
+# commands python-OBD needs to set up the adapter; service/obd2_bridge/guard.py
+# blocks anything else at the serial port, and the tests prove it on the simulator.
+# No mode 04 (clear codes) until the harness has approvals (design §7.3).
+safety: read-only
+
+hardware:
+  devices:
+    - env: OBD_DEVICE         # e.g. /dev/serial/by-id/usb-ScanTool.net_OBDLink_SX_…
+      description: USB OBD-II adapter (a Wi-Fi one is a socket:// URL, no device)
+  simulator: simulator/
+
+services:
+  - name: obd2
+    profile: obd2
+    health: http://p4n4-obd2:8090/health
+  - name: obd2-sim
+    profile: obd2-sim
+    description: ELM327 simulator on TCP 35000, instead of a car
+
+data:
+  device_id_env: OBD_DEVICE_ID          # default: "car"
+  publishes:
+    - pattern: sensors/<device-id>/<measurement>
+      payload: '{"value": 2150, "unit": "rpm"}'
+      rate: 5 Hz (rpm, speed, maf), 1 Hz (load, temperatures, trims, throttle, fuel), 0.2 Hz (battery_v)
+    - pattern: sensors/<device-id>/raw
+      payload: '{"values": [rpm, load, coolant, stft, ltft, maf, speed]}'
+      rate: 1 Hz, while the car supports all seven
+    - pattern: alerts/<device-id>/dtc
+      payload: >-
+        {"codes": ["P0171"], "pending": [], "permanent": [], "mil": true,
+        "descriptions": {"P0171": "System Too Lean"}, "freeze_frame": {"dtc": "P0171"}}
+      rate: on change
+    - pattern: status/<device-id>/online
+      payload: '{"online": true, "vehicle": true, "adapter": "ELM327 v1.5", "protocol": "ISO 15765-4 (CAN 11/500)"}'
+      retained: true
+  subscribes: []
+
+env:
+  required: [OBD_DEVICE, OBD_DEVICE_ID, MQTT_HOST]
+  optional:
+    - OBD_DEVICE_GID
+    - OBD_BAUDRATE
+    - OBD_PROTOCOL
+    - OBD_POLL_FAST_HZ
+    - OBD_POLL_SLOW_HZ
+    - OBD_VOLTAGE_INTERVAL
+    - OBD_DTC_INTERVAL
+    - OBD_PIDS
+    - OBD_RAW
+    - OBD2_BIND
+    - OBD2_PORT
+    - OBD2_LOG_LEVEL
+    - MQTT_PORT
+    - MQTT_USER
+    - MQTT_PASSWORD
+    - OBD_SIM_SCENARIO
+    - OBD_SIM_DROP_EVERY
+
+api:                          # used by the harness's obd_* tools
+  - GET /health
+  - GET /api/v1/probe         # protocol, VIN (hashed), supported measurements, adapter
+  - GET /api/v1/dtc           # stored, pending and permanent codes, MIL, freeze frame DTC
+
+smoke_test: tests/smoke.sh
